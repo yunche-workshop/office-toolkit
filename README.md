@@ -12,8 +12,9 @@
 |---|---|---|---|
 | [喝水提醒](tools/water-reminder/) | 只在工作时段提醒你喝水，进时段先弹一杯、午休自动跳过，玻璃质感弹窗，缩在托盘里 | 8.0 MB | ✅ v0.9.1 |
 | [批量重命名](tools/batch-renamer/) | 八条规则链批量改名，执行前预览、撞名标红，**改错了一键撤销** | 7.6 MB | ✅ v0.1.0 |
+| [图片转 PDF](tools/img2pdf/) | 一堆 JPG/PNG 拼成一个 PDF，**JPEG 原样封装不重编码**，页序、纸张、边距可调 | 7.6 MB | ✅ v0.1.0 |
 
-后面还会加图片批量处理、Excel 批量合并之类——都是自己每周真在用的活儿。
+后面还会加图片压缩、Excel 批量合并之类——都是自己每周真在用的活儿。
 
 ---
 
@@ -29,7 +30,15 @@
 
 ## 下载
 
-到 [Releases](../../releases) 页面拿 exe，不用装 Python。
+每个工具单独发版、单独一条 Release，各下各的，互不影响：
+
+| 工具 | 版本 | 下载 |
+|---|---|---|
+| [喝水提醒](tools/water-reminder/) | v0.9.1 | [WaterReminder.exe](https://github.com/yunche-workshop/office-toolkit/releases/tag/water-reminder-v0.9.1) |
+| [批量重命名](tools/batch-renamer/) | v0.1.0 | [BatchRenamer.exe](https://github.com/yunche-workshop/office-toolkit/releases/tag/batch-renamer-v0.1.0) |
+
+都是绿色单文件，双击就用，不用装 Python，也不用装任何运行库。
+全部 exe 也可以在 [Releases](../../releases) 页面一起翻。
 
 ---
 
@@ -49,10 +58,13 @@ office-toolkit/
    │  ├─ tests/           单测 + 真机自检
    │  ├─ assets/          图标
    │  └─ build.py         打包脚本
-   └─ batch-renamer/      批量重命名
+   ├─ batch-renamer/      批量重命名
+   └─ img2pdf/            图片转 PDF
 ```
 
-每个工具自成一个目录，互不依赖，单独下载也能跑。
+每个工具自成一个目录，互不依赖，单独下载也能跑。目录内部结构都一样：
+`README.md`（工具说明）+ `CHANGELOG.md`（改动记录）+ `src/`（纯标准库源码）+
+`tests/`（单测和自检）+ `assets/`（图标）+ `build.py`（打包脚本）。
 
 ---
 

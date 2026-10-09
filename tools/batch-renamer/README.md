@@ -29,6 +29,14 @@
 
 排序按**自然序**（`file2` 排在 `file10` 前面，不是字典序），这点对编号文件很重要。
 
+## 截图
+
+![载入文件](assets/screenshots/02_载入文件.png)
+
+![规则与预览](assets/screenshots/03_规则与预览.png)
+
+![改名完成](assets/screenshots/04_改名完成.png)
+
 ## 撤销怎么用
 
 每次改名都会在那些文件所在的文件夹里写一个 `.batch_renamer_undo.json`，
@@ -49,7 +57,7 @@
 
 ## 跑起来
 
-下载 `dist/BatchRenamer.exe`，双击。不用安装，也不需要管理员权限。
+从 [本工具的 Release](https://github.com/yunche-workshop/office-toolkit/releases/tag/batch-renamer-v0.1.0) 下载 `BatchRenamer.exe`，双击。不用安装，也不需要管理员权限。
 
 从源码跑：
 

@@ -9,9 +9,15 @@ Windows 上按**工作时段**提醒你喝水的小工具。玻璃质感弹窗�
 
 ## 截图
 
-（待补充：设置界面深色 / 浅色 / 提醒弹窗 / 托盘菜单 —— 用 0.9.1 的 exe 重截，
-开发期跑 `python tests/drag_probe/ui_shot.py` 一键出七张：设置深色、设置浅色、
-提醒弹窗两张、收起时的提示条、关于窗深色 / 浅色。托盘菜单那张得手动截）
+| 提醒弹窗 | 设置界面（深色） |
+|---|---|
+| ![提醒弹窗](assets/screenshots/01_提醒弹窗.png) | ![设置深色](assets/screenshots/02_设置界面_深色.png) |
+
+| 设置界面（浅色） | 托盘菜单 |
+|---|---|
+| ![设置浅色](assets/screenshots/03_设置界面_浅色.png) | ![托盘菜单](assets/screenshots/04_托盘菜单.png) |
+
+> 深色和浅色两套配色是各自调的，不是简单反色。
 
 ---
 
@@ -60,7 +66,7 @@ Windows 上按**工作时段**提醒你喝水的小工具。玻璃质感弹窗�
 
 ## 怎么用
 
-1. 从 [Releases](https://github.com/yunche-workshop/office-toolkit/releases) 下载 `WaterReminder.exe`
+1. 从 [本工具的 Release](https://github.com/yunche-workshop/office-toolkit/releases/tag/water-reminder-v0.9.1) 下载 `WaterReminder.exe`
 2. 双击运行 → 右下角出现水滴托盘图标，同时弹出设置界面
 3. 填四个数：上班时间、下班时间、每隔多久、每次喝多少
 4. 点「保存」
