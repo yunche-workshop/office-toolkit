@@ -3,11 +3,16 @@
 win32ext.py —— Windows 原生能力扩展（纯 ctypes，零第三方依赖）
 
 提供：
-  * 亚克力毛玻璃窗口背景（Acrylic Blur Behind）
-  * 窗口圆角 / 无边框拖拽
+  * DPI 感知声明、窗口圆角 / 投影 / 置顶 / 从任务栏隐藏 / 抢前台
   * 系统托盘图标（Shell_NotifyIcon + 独立消息线程）
   * 开机自启（注册表 HKCU Run）
-  * 单实例互斥体
+  * 单实例互斥体 + "第二实例把已在跑的窗口叫到前台"的跨进程唤醒
+  * 提示音（winsound）、跟随系统的深色/浅色判定
+  * 多显示器工作区、虚拟桌面钳制
+
+注意这里不再有"亚克力毛玻璃"：-transparentcolor / Accent 那套透明分层窗口
+在拖动时会触发 DWM 崩溃（实测 Fatal Python error → 0xC0000409），
+界面改用稳定实色的玻璃拟态，见 ui.py 顶部说明。
 """
 
 import ctypes
@@ -15,6 +20,11 @@ import os
 import sys
 import threading
 from ctypes import wintypes as wt
+
+try:
+    import winsound
+except Exception:      # 非 Windows / 精简系统上没这个模块：静音降级，不影响提醒
+    winsound = None
 
 try:
     import winreg
@@ -26,14 +36,13 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
 
-WM_NCLBUTTONDOWN = 0x00A1
-HTCAPTION = 0x0002
 WM_USER = 0x0400
 WM_DESTROY = 0x0002
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONUP = 0x0205
 WM_LBUTTONDBLCLK = 0x0203
 WM_NULL = 0x0000
+WM_CLOSE = 0x0010
 
 NIM_ADD = 0x00000000
 NIM_MODIFY = 0x00000001
@@ -48,7 +57,6 @@ LR_LOADFROMFILE = 0x00000010
 LR_DEFAULTSIZE = 0x00000040
 IDI_APPLICATION = 32512
 SM_CXSMICON = 49          # 托盘 / 小图标的名义像素宽（100% DPI 下是 16）
-SM_CXICON = 11            # 普通图标名义尺寸（32），LR_DEFAULTSIZE 取的就是它
 
 TPM_RETURNCMD = 0x0100
 TPM_NONOTIFY = 0x0080
@@ -115,65 +123,6 @@ def windows_build():
         return 0
 
 
-class ACCENT_POLICY(ctypes.Structure):
-    _fields_ = [
-        ("AccentState", ctypes.c_int),
-        ("AccentFlags", ctypes.c_int),
-        ("GradientColor", ctypes.c_uint),
-        ("AnimationId", ctypes.c_int),
-    ]
-
-
-class WINCOMPATTRDATA(ctypes.Structure):
-    _fields_ = [
-        ("Attribute", ctypes.c_int),
-        ("Data", ctypes.POINTER(ACCENT_POLICY)),
-        ("SizeOfData", ctypes.c_size_t),
-    ]
-
-
-def apply_glass(hwnd, red=24, green=24, blue=28, alpha=190):
-    """
-    给窗口套上亚克力毛玻璃。
-    成功返回 True；系统不支持（Win10 1709 以下 / 远程桌面）返回 False，调用方要回退到实色背景。
-    """
-    if not hwnd:
-        return False
-    try:
-        fn = user32.SetWindowCompositionAttribute
-    except AttributeError:
-        return False
-
-    fn.argtypes = [wt.HWND, ctypes.c_void_p]
-    fn.restype = ctypes.c_int
-
-    accent = ACCENT_POLICY()
-    accent.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
-    accent.AccentFlags = 2  # 允许整窗透明
-    accent.GradientColor = (
-        (alpha << 24) | (blue << 16) | (green << 8) | red
-    )  # ABGR
-
-    data = WINCOMPATTRDATA()
-    data.Attribute = 19  # WCA_ACCENT_POLICY
-    data.Data = ctypes.pointer(accent)
-    data.SizeOfData = ctypes.sizeof(accent)
-
-    try:
-        ok = fn(wt.HWND(hwnd), ctypes.byref(data))
-    except Exception:
-        return False
-    if not ok:
-        # 退而求其次：Win10 早期版本的模糊背景
-        accent.AccentState = 3  # ACCENT_ENABLE_BLURBEHIND
-        accent.AccentFlags = 0
-        try:
-            ok = fn(wt.HWND(hwnd), ctypes.byref(data))
-        except Exception:
-            return False
-    return bool(ok)
-
-
 def set_round_corner(hwnd, mode=DWMWCP_ROUND):
     """Win11 圆角窗口；老系统静默失败。"""
     if not hwnd:
@@ -192,9 +141,15 @@ def set_round_corner(hwnd, mode=DWMWCP_ROUND):
 
 
 def set_window_shadow(hwnd):
-    """给无边框窗口加投影（CS_DROPSHADOW），让它"浮"起来。"""
+    """
+    给无边框窗口加投影。
+    Win11（build >= 22000）的 DWM 本来就会给顶层窗口画一层柔和投影，
+    再叠一次 CS_DROPSHADOW 就是两层影、边上多出一道硬边 —— 所以只在老系统上加。
+    """
     if not hwnd:
         return False
+    if windows_build() >= 22000:
+        return True
     GCL_STYLE = -26
     CS_DROPSHADOW = 0x00020000
     try:
@@ -209,13 +164,155 @@ def set_window_shadow(hwnd):
         return False
 
 
-def _removed_start_drag_note():
+# ---------------------------------------------------------------- 前台与键盘焦点
+#
+# 无边框（overrideredirect）窗口默认既不进任务栏也拿不到键盘焦点，
+# 于是弹窗上绑的"回车=喝了"、设置窗的"Ctrl+S=保存"其实是空绑：
+# 焦点还在用户上一刻用的那个程序里，键全打到别的窗口去了。
+# 下面这套是标准做法 —— 把自己线程跟当前前台线程临时挂一起，
+# 才可能越过 Windows 的前台锁把焦点拿到手（拿不到也别硬抢，见返回值）。
+
+
+def activate_window(hwnd):
     """
-    这里原来有个 start_drag(hwnd)：ReleaseCapture + SendMessageW(WM_NCLBUTTONDOWN,
-    HTCAPTION)。它在 Tk 事件回调里进入 Windows 模态移动循环，导致 Tcl 重入
-    （Fatal Python error: PyEval_RestoreThread: NULL tstate → abort），
-    表现为"鼠标按住无边框窗口就闪退"。已删除，拖动改在 ui.py 里用纯 Tk 实现。
+    尽力把这个窗口拉到前台并拿到键盘焦点。
+    成功返回 True；系统不让抢（用户正在别处打字）返回 False，调用方别硬来。
     """
+    if not hwnd:
+        return False
+    try:
+        SW_SHOW = 5
+        user32.ShowWindow(wt.HWND(hwnd), SW_SHOW)
+        fg = user32.GetForegroundWindow()
+        if fg and fg != wt.HWND(hwnd):
+            mine = user32.GetWindowThreadProcessId(wt.HWND(hwnd), None)
+            theirs = user32.GetWindowThreadProcessId(fg, None)
+            attached = False
+            if mine and theirs and mine != theirs:
+                attached = bool(user32.AttachThreadInput(ctypes.c_ulong(theirs), ctypes.c_ulong(mine), True))
+            try:
+                user32.BringWindowToTop(wt.HWND(hwnd))
+                ok = bool(user32.SetForegroundWindow(wt.HWND(hwnd)))
+            finally:
+                if attached:
+                    user32.AttachThreadInput(ctypes.c_ulong(theirs), ctypes.c_ulong(mine), False)
+        else:
+            ok = bool(user32.SetForegroundWindow(wt.HWND(hwnd)))
+        user32.SetFocus(wt.HWND(hwnd))
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def is_foreground(hwnd):
+    """当前前台是不是这个窗口（用来判断键位绑定到底有没有通路）。"""
+    try:
+        return bool(hwnd) and user32.GetForegroundWindow() == wt.HWND(hwnd)
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------- 跨进程唤醒
+#
+# 双击 exe 时如果已经有一个在跑，以前的做法是弹一个"已经在运行了"的 MessageBox
+# 然后自己退出 —— 用户视角是"我双击了，什么都没发生"。
+# 正确姿势：把已在跑的那个实例的设置窗叫到前台。
+# RegisterWindowMessageW 用同一个字符串在任何进程里都拿到同一个 ID，
+# 所以靠窗口类名找到它的托盘隐藏窗口，再 PostMessage 过去就行。
+
+TRAY_CLASS = "WaterReminderTrayClass"
+ACTIVATE_MSG_NAME = "WaterReminder_Activate_v1"
+# 约定：收到唤醒消息时，回调收到的命令号（和托盘点击那套命令号同一个通道）
+TRAY_ACTIVATE = 90003
+
+_activate_msg = [None]
+
+
+def activate_message_id():
+    """本进程内注册（幂等）跨进程唤醒用的窗口消息号。"""
+    if _activate_msg[0] is None:
+        try:
+            _activate_msg[0] = user32.RegisterWindowMessageW(ACTIVATE_MSG_NAME)
+        except Exception:
+            _activate_msg[0] = 0
+    return _activate_msg[0] or 0
+
+
+def find_tray_window(class_name=TRAY_CLASS):
+    """找到已在跑的那个实例的隐藏消息窗口；没找到返回 0。"""
+    try:
+        return user32.FindWindowW(class_name, None) or 0
+    except Exception:
+        return 0
+
+
+def wake_running_instance(class_name=TRAY_CLASS):
+    """
+    第二实例调用：把第一实例的窗口叫出来。
+    成功 True（那边走托盘线程回调 → 主线程开设置窗）；False 表示其实没在跑。
+    """
+    hwnd = find_tray_window(class_name)
+    if not hwnd:
+        return False
+    msg = activate_message_id()
+    if not msg:
+        return False
+    try:
+        return bool(user32.PostMessageW(wt.HWND(hwnd), ctypes.c_uint(msg), 0, 0))
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------- 提示音
+#
+# 只有视觉提醒的话，人离开工位那一刻必然漏（这也是"到点不提醒"投诉的一半来源）。
+# winsound 是标准库，不占体积、不联网；异步播放，绝不因为响一声就把主循环卡住。
+
+_SOUND_ALIASES = ("MailBeep", "SystemAsterisk", "SystemExclamation")
+
+
+def play_cue(alias="MailBeep"):
+    """播一声系统提示音（异步）。系统里没这个声音就往下退，最后退到 MessageBeep。"""
+    if winsound is None:
+        return False
+    SND_ASYNC = 0x0001
+    SND_ALIAS = 0x0004
+    chain = [alias] + [a for a in _SOUND_ALIASES if a != alias]
+    for name in chain:
+        try:
+            winsound.PlaySound(name, SND_ALIAS | SND_ASYNC)
+            return True
+        except Exception:
+            continue
+    try:
+        winsound.MessageBeep(-1)      # MB_OK
+        return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------- 深色 / 浅色
+#
+# 界面默认跟随系统的"应用使用深色模式"，这样在浅色任务栏的桌面上不会突兀。
+# 读不到（老系统 / 注册表被精简）算深色，因为这套配色本来就是按深色调的。
+
+
+def apps_use_light_theme():
+    if winreg is None:
+        return False
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            0, winreg.KEY_READ)
+        try:
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return bool(int(value))
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        return False
+
 
 
 def set_topmost(hwnd, on=True):
@@ -499,6 +596,14 @@ _sig(kernel32, "GetModuleHandleW", wt.HMODULE, [_W])
 _sig(kernel32, "CreateMutexW", _H, [_UV, _B, _W])
 _sig(kernel32, "CloseHandle", _B, [_H])
 _sig(kernel32, "ReleaseMutex", _B, [_H])
+_sig(user32, "RegisterWindowMessageW", _UI, [_W])
+_sig(user32, "FindWindowW", wt.HWND, [_W, _W])
+_sig(user32, "ShowWindow", _B, [wt.HWND, _I])
+_sig(user32, "GetForegroundWindow", wt.HWND, [])
+_sig(user32, "GetWindowThreadProcessId", _UI, [wt.HWND, _UV])
+_sig(user32, "AttachThreadInput", _B, [wt.DWORD, wt.DWORD, _B])
+_sig(user32, "BringWindowToTop", _B, [wt.HWND])
+_sig(user32, "SetFocus", wt.HWND, [wt.HWND])
 
 
 # ---------------------------------------------------------------- 多显示器
@@ -603,6 +708,9 @@ class TrayIcon(object):
         self._thread = None
         self._wndproc_ref = None
         self._ready = threading.Event()
+        # 第二个实例双击 exe 时往这个消息号上 PostMessage，我们收到就回调"打开设置"。
+        # 在这里（主线程）注册一次就行：消息号是系统级的，跨进程一致。
+        self._activate_msg = activate_message_id()
         # HICON 只加载一次。以前每次刷新都 LoadImageW 一遍又从不 DestroyIcon，
         # 实测每刷一次漏 1 个 GDI + 3 个 USER 对象（见 tests/drag_probe/tray_leak.py）。
         # 这程序是常驻的，一天十几次刷新攒几个月就会顶到 USER 对象配额。
@@ -738,6 +846,14 @@ class TrayIcon(object):
                                      wt.WPARAM(wparam), wt.LPARAM(lparam))
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
+        if self._activate_msg and msg == self._activate_msg:
+            # 第二个实例被双击起来了 —— 等于用户想看这个程序，把设置窗叫出来
+            if self.callback:
+                try:
+                    self.callback(TRAY_ACTIVATE)
+                except Exception:
+                    pass
+            return 0
         if msg == WM_USER + 1:  # 托盘消息
             if lparam in (WM_RBUTTONUP, 0x0204):  # 右键
                 self._show_menu()
@@ -762,7 +878,7 @@ class TrayIcon(object):
     def _run(self):
         try:
             hinstance = kernel32.GetModuleHandleW(None)
-            class_name = "WaterReminderTrayClass"
+            class_name = TRAY_CLASS
             self._wndproc_ref = WNDPROC(self._wndproc)
             wc = WNDCLASS()
             wc.lpfnWndProc = self._wndproc_ref

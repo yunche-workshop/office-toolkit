@@ -32,6 +32,9 @@ tools/water-reminder/tests/screenshot.py
 tools/water-reminder/tests/shot_*.png
 tools/water-reminder/tests/_drag_*.py
 tools/water-reminder/tests/_fix_*.py
+# 一次性逻辑探针：等价的持久断言已经写进 tests/test_*.py，脚本本身不进仓库
+tools/water-reminder/tests/probe_main.py
+tools/water-reminder/tests/probe_main.py
 
 # 图标生成过程的预览图（人眼检查用，随时可重生成）
 tools/water-reminder/assets/*_preview.png
