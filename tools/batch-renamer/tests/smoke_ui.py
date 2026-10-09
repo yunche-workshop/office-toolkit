@@ -8,15 +8,20 @@ smoke_ui.py —— 界面冒烟（不弹窗，造完窗口就销毁）
 """
 
 import os
+import math
 import sys
 import tempfile
 import shutil
 import tkinter as tk
+from tkinter import font as tkfont
+from tkinter import ttk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
 
 import win32ext  # noqa: E402
+import brand  # noqa: E402
+import core  # noqa: E402
 import ui  # noqa: E402
 
 ok = 0
@@ -31,6 +36,29 @@ def check(name, cond, extra=""):
     else:
         bad.append(name)
         print("  FAIL %s %s" % (name, extra))
+
+
+def _labels(widget):
+    """递归收集所有 Label（tk 和 ttk 两种都要，关于窗的标题行是 ttk.Label）。"""
+    out = []
+    for child in widget.winfo_children():
+        if isinstance(child, (tk.Label, ttk.Label)):
+            out.append(child)
+        out.extend(_labels(child))
+    return out
+
+
+def _lines(label):
+    """这行文字按它自己的 wraplength 会被切成几行 —— 用 Tk 的度量，不靠猜。"""
+    text = str(label.cget("text"))
+    try:
+        wrap = int(label.cget("wraplength"))
+        f = tkfont.Font(font=label.cget("font"))
+    except Exception:          # ttk.Label 根本没有 wraplength 这个选项
+        return 1
+    if wrap <= 0:
+        return 1
+    return max(1, int(math.ceil(f.measure(text) / float(wrap))))
 
 
 def main():
@@ -112,6 +140,54 @@ def main():
         check("replace 规则读回", rules[0]["find"] == "IMG_", rules[0])
         check("number 的 pos 是后缀", rules[5]["pos"] == "suffix", rules[5])
         check("template 已关闭", rules[7]["enabled"] is False)
+
+        print("10) 署名与关于窗")
+        byline = app.credit.cget("text")
+        check("底部有常驻署名", "允澈工坊" in byline, byline)
+        check("署名行带工具名和版本号",
+              "批量重命名" in byline and core.VERSION in byline, byline)
+        dialog = app.show_about()
+        root.update()
+        check("点署名能打开关于窗",
+              dialog is not None and dialog.winfo_exists())
+        check("重复点不叠第二扇", app.show_about() is dialog)
+        blob = " | ".join(str(c.cget("text")) for c in _labels(dialog))
+        check("关于窗里有品牌名", brand.WORKSHOP in blob)
+        check("关于窗里有仓库地址", brand.repo_display() in blob,
+              brand.repo_display())
+        check("显示的那行不带协议头", "https://" not in blob)
+        check("关于窗里有协议和版本",
+              "MIT" in blob and core.VERSION in blob)
+        check("简介用的是 core.SUMMARY（不在界面里另写一版）",
+              core.SUMMARY in blob, core.SUMMARY)
+        old_clip = None
+        try:
+            old_clip = root.clipboard_get()
+        except Exception:
+            pass
+        dialog.copy_repo()
+        root.update()
+        try:
+            got = root.clipboard_get()
+        except Exception:
+            got = None
+        check("「复制仓库地址」真的进了剪贴板", got == brand.REPO_URL,
+              repr(got)[:60])
+        check("复制后有回显", "已复制" in dialog.hint.cget("text"),
+              dialog.hint.cget("text"))
+        # 每行文字都必须是"看得完"的：wraplength 算小了会出现半行被裁
+        tight = [(str(l.cget("text"))[:10], _lines(l))
+                 for l in _labels(dialog) if _lines(l) > 4]
+        check("关于窗里的长文案没有炸到 4 行以上", not tight, str(tight))
+        dialog.destroy()
+        root.update()
+        check("关于窗能关掉", not dialog.winfo_exists())
+        if old_clip is not None:
+            try:
+                root.clipboard_clear()
+                root.clipboard_append(old_clip)
+            except Exception:
+                pass
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

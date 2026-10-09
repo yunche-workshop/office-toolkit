@@ -17,6 +17,15 @@ import json
 import time
 import tempfile
 
+APP_NAME = "BatchRenamer"
+
+# 版本号的唯一来源：exe 文件属性（build.py）、界面署名、关于窗都读这里，
+# 免得出现"属性里 0.1、界面上 v0.2"。
+VERSION = "0.1.0"
+
+# 一句话简介：关于窗和 --help 用同一句，别在界面里另写一版。
+SUMMARY = "批量改文件名，改错了能一键撤销"
+
 # Windows 文件名非法字符
 ILLEGAL_CHARS = '<>:"/\\|?*'
 # Windows 保留设备名

@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src"))
 
 import tkinter as tk  # noqa: E402
 
+import brand  # noqa: E402
 import core  # noqa: E402
 import win32ext  # noqa: E402
 
@@ -177,6 +178,77 @@ def run_checks(app, root):
     pump(root, 1400)
     check("提示条会自己收掉",
           not (app.hint_win and app.hint_win.winfo_exists()))
+
+    # ---------- 署名 + 关于窗 ----------
+    credit_txt = win.canvas.itemcget(win.txt_credit, "text")
+    check("设置窗口常驻署名（含品牌名和版本号）",
+          "允澈工坊" in credit_txt and core.VERSION in credit_txt, credit_txt)
+    cb_box = win.canvas.bbox(win.txt_credit)
+    quit_box = None
+    for it in win.canvas.find_all():
+        if win.canvas.type(it) == "text" and \
+                win.canvas.itemcget(it, "text") == "退出程序":
+            quit_box = win.canvas.bbox(it)
+    check("署名行不压到底部按钮",
+          cb_box and quit_box and cb_box[1] >= quit_box[3],
+          "credit=%s quit=%s" % (cb_box, quit_box))
+    check("署名行没被窗口下沿切掉",
+          cb_box and cb_box[3] <= win.height,
+          "%s vs 窗高 %d" % (cb_box, win.height))
+
+    about = app.show_about()
+    pump(root, 200)
+    check("点署名能打开关于窗", about is not None and about.winfo_exists())
+    check("关于窗只开一扇（重复点不叠窗）",
+          about is not None and app.show_about() is about)
+    if about is not None and about.winfo_exists():
+        texts = [about.canvas.itemcget(i, "text")
+                 for i in about.canvas.find_all()
+                 if about.canvas.type(i) == "text"]
+        blob = " | ".join(texts)
+        check("关于窗里有品牌名、仓库地址、协议",
+              "允澈工坊" in blob and brand.repo_display() in blob
+              and "MIT" in blob)
+        check("关于窗显示的地址不带协议头（省一行、不顶到卡片边）",
+              "https://" not in blob)
+        check("关于窗里的版本号就是 core.VERSION",
+              core.VERSION in blob, core.VERSION)
+        ab = bbox(about)
+        check("关于窗在屏幕内", inside(ab, area), str(ab))
+        worst = None
+        for i in about.canvas.find_all():
+            if about.canvas.type(i) != "text":
+                continue
+            b = about.canvas.bbox(i)
+            if b and (b[3] > about.height - about.u(3) or b[1] < 0):
+                worst = (about.canvas.itemcget(i, "text")[:12], b)
+        check("关于窗没有文字被上下沿切掉", worst is None, str(worst))
+        # 复制：真走一遍剪贴板，界面上那句回显也要变
+        old_clip = None
+        try:
+            old_clip = root.clipboard_get()
+        except Exception:
+            pass
+        about.copy_repo()
+        pump(root, 120)
+        try:
+            got = root.clipboard_get()
+        except Exception:
+            got = None
+        check("「复制仓库地址」真的进了剪贴板", got == brand.REPO_URL,
+              repr(got)[:60])
+        check("复制后有回显",
+              "已复制" in about.canvas.itemcget(about.txt_hint, "text"),
+              about.canvas.itemcget(about.txt_hint, "text"))
+        if old_clip is not None:
+            try:
+                root.clipboard_clear()
+                root.clipboard_append(old_clip)
+            except Exception:
+                pass
+        about.close()
+        pump(root, 120)
+        check("关于窗能被 × 关掉", not about.winfo_exists())
 
     # ---------- 拖动钳制：拖动时至少露 40 像素，从托盘唤起时整扇拉回 ----------
     vd = win32ext.virtual_desktop()

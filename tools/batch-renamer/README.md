@@ -60,11 +60,13 @@ python src/main.py
 ## 自己打包
 
 ```bash
-# 用装了 PyInstaller 的 venv（Python 3.8 + tkinter 那套）
-C:/Users/Mu/.workbuddy/binaries/python/envs/tk38/Scripts/python.exe build.py
+# 用装了 PyInstaller 的那个 venv（Python 3.8 + tkinter 那套），别用系统 Python
+python build.py
 ```
 
-产物在 `dist/BatchRenamer.exe`。
+产物在 `dist/BatchRenamer.exe`。`build.py` 会按 `src/core.py` 里的 `VERSION`
+生成版本元数据再传给 PyInstaller，所以 exe 右键 → 属性 → 详细信息里的版本号
+和界面署名的那个 v0.1.0 永远是一致的。
 
 ## 技术说明
 
@@ -72,14 +74,23 @@ C:/Users/Mu/.workbuddy/binaries/python/envs/tk38/Scripts/python.exe build.py
 - 核心逻辑都在 `src/core.py`，纯函数，不碰界面 → `python tests/test_core.py` 可直接跑 31 项单测
 - 界面在 `src/ui.py`，DPI 感知 + 200% 缩放适配；窗口尺寸和字号统一过 `win32ext.px()`
 - 图标由 `src/icon.py` 纯标准库现画（手写 PNG 编码再包 ICO），不依赖任何美术素材
+- 版本号（`core.VERSION`）、简介（`core.SUMMARY`）、署名和品牌信息（`src/brand.py`）
+  各只有一个来源，底部那行小字、关于窗、exe 属性读的都是这几处
+
+## 界面署名
+
+底部按钮栏右边有一行「制作 by 允澈工坊 · 批量重命名 v0.1.0」，点它弹关于窗：
+工具名和版本、一句话简介、仓库地址、许可协议、运行环境、联网情况。
+仓库那一行可以直接点（会叫出浏览器），也可以点「复制仓库地址」，
+复制的是完整地址，包括 `https://`。
 
 ## 测试
 
 ```bash
 python tests/test_core.py          # 核心逻辑 31 项
-python tests/smoke_ui.py           # 界面冒烟 16 项（需要 tkinter）
+python tests/smoke_ui.py           # 界面冒烟 29 项（需要 tkinter，含署名与关于窗 13 项）
 ```
 
 ## 许可
 
-MIT
+MIT · 允澈工坊（[yunche-workshop](https://github.com/yunche-workshop)）

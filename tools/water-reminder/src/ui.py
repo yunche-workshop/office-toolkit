@@ -18,9 +18,11 @@ Windows 11 的 Mica 视觉：
 import datetime as dt
 import math
 import os
+import webbrowser
 import tkinter as tk
 from tkinter import font as tkfont
 
+import brand
 import core
 import win32ext
 
@@ -235,7 +237,7 @@ class GlassWindow(tk.Toplevel):
     无边框 + 稳定玻璃拟态背景的窗口。width/height 传 96dpi 设计值。
 
     self.S = 系统 DPI 因子 × 自适应系数：
-    150% 缩放的 1080p 笔记本上，580×768 的设置窗物理高是 1152，比工作区还高，
+    150% 缩放的 1080p 笔记本上，580×792 的设置窗物理高是 1188，比工作区还高，
     底部那一排"保存 / 退出程序"会被整条切掉 —— 用户装完第一次打开就点不到保存。
     所以构造时先按当前显示器的工作区算一个 fit（缩到放不下为止，最低 MIN_FIT），
     坐标和字体都过这一个因子，不会出现"框缩了字没缩"的对不齐。
@@ -386,6 +388,28 @@ class GlassWindow(tk.Toplevel):
         self.canvas.create_line(self.u(x0), self.u(y0), self.u(x1), self.u(y1),
                                 fill=self.C["line"])
 
+    def link(self, x, y, content, command, size=9, color=None, anchor="w",
+             width=None, key="link"):
+        """
+        可点击的一行文字（署名、仓库地址）。
+
+        不用 ttk.Button 长得像链接：那玩意在深色底上永远是个按钮框。
+        tag 统一以 link_ 开头，_press_on_control 认这个前缀，
+        所以点它的时候不会顺带把窗口拖走。
+        """
+        item = self.text(x, y, content, size=size,
+                         color=color or self.C["accent"], anchor=anchor,
+                         width=width)
+        tag = "link_%s_%d" % (key, item)
+        self.canvas.itemconfigure(item, tags=tag)
+        self.canvas.tag_bind(tag, "<ButtonRelease-1>",
+                             lambda _e: command())
+        self.canvas.tag_bind(tag, "<Enter>",
+                             lambda _e: self.canvas.configure(cursor="hand2"))
+        self.canvas.tag_bind(tag, "<Leave>",
+                             lambda _e: self.canvas.configure(cursor=""))
+        return item
+
     def drop(self, cx, cy, size, color=None):
         """画一个水滴小图标。"""
         pts = []
@@ -534,7 +558,9 @@ class GlassWindow(tk.Toplevel):
             if not item:
                 return False
             tags = canvas.gettags(item[0])
-            if any(str(t).startswith("btn_") for t in tags):
+            # btn_ = 自绘按钮，link_ = 可点击文字（署名行、仓库地址）。
+            # 按在这两类元素上都不该顺手把窗口拖走。
+            if any(str(t).startswith(("btn_", "link_")) for t in tags):
                 return True
             return canvas.type(item[0]) in ("window",)
         except Exception:
@@ -951,12 +977,114 @@ class ReminderWindow(GlassWindow):
             pass
 
 
+# ---------------------------------------------------------------- 关于小窗
+
+
+class AboutWindow(GlassWindow):
+    """
+    「关于」：品牌署名 + 版本 + 仓库 + 协议，两个工具里内容和顺序一致。
+
+    为什么值得单独做一扇窗：这套工具的引流全靠"人在界面上看到名字、
+    想知道去哪儿找下一个"。所以仓库地址必须一眼看到、一键复制，
+    版本号也从这里出（core.VERSION 是唯一来源）。
+    高度按文字实测行数算出来，不是拍脑袋写死的 —— 长文案换行会顶掉下一行。
+    """
+
+    WIDTH = 420
+    ROW_H = 18          # size 10 一行占多少设计像素
+    LABEL_X = 80        # 值这一列的起点（相对窗口左边）
+
+    def __init__(self, master, tool_name, version, summary, dark=True):
+        rows = brand.about_rows(tool_name, version, summary)
+        p, W = self.PAD, self.WIDTH
+        wrap = W - p - 18 - self.LABEL_X        # 值可用的排版宽度（设计值）
+        phys = wrap * win32ext.DPI_SCALE
+        meas = font_obj(10)
+        blocks = []
+        for label, value, target in rows:
+            try:
+                lines = max(1, int(math.ceil(
+                    float(meas.measure(value)) / max(1.0, phys))))
+            except Exception:
+                lines = 1
+            # 中文按标点断行时 Tk 会比 measure 多占一行，统一再留一行余量
+            blocks.append((label, value, target, min(4, lines + 1)))
+        card_h = sum(b[3] * self.ROW_H + 10 for b in blocks) + 22
+        top = 68
+        by = top + card_h + 18
+        height = by + 38 + 16
+
+        GlassWindow.__init__(self, master, W, height, dark=dark,
+                             topmost=True, center=True)
+        C = self.C
+        self.drop(p + 11, 26, 24)
+        self.text(p + 30, 20, brand.WORKSHOP, size=15, weight="bold")
+        self.text(p + 30, 42, "office-toolkit · 内网办公小工具集",
+                  size=9, color=self.C["sub"])
+        GlassButton(self, W - p - 34, 18, 34, 26, "×", self.close,
+                    primary=False, font_size=12)
+        self.enable_drag()
+        self.bind("<Escape>", lambda e: self.close())
+
+        self.card(p, top, W - p, top + card_h, r=16)
+        y = top + 16
+        self.url = None
+        for label, value, target, lines in blocks:
+            self.text(p + 18, y, label, size=9, color=C["faint"], anchor="nw")
+            if target:
+                # 显示的是不带协议头的那一行，点/复制的是完整地址
+                self.url = target
+                self.link(p + self.LABEL_X, y - 1, value, self.copy_repo,
+                          size=10, anchor="nw", width=wrap, key="repo")
+            else:
+                self.text(p + self.LABEL_X, y - 1, value, size=10,
+                          color=C["text"], anchor="nw", width=wrap)
+            y += lines * self.ROW_H + 10
+
+        # 左边留给"已复制"的回显，右边才是按钮：以前按钮占满一行，
+        # 点完复制没有任何反馈，用户以为没生效又点一次。
+        self.txt_hint = self.text(p + 2, by + 19, "", size=9, color=C["sub"])
+        GlassButton(self, W - p - 92, by, 92, 38, "打开仓库", self.open_repo,
+                    primary=True, font_size=10)
+        GlassButton(self, W - p - 92 - 8 - 112, by, 112, 38, "复制仓库地址",
+                    self.copy_repo, primary=False, font_size=10)
+
+    def close(self):
+        """× / Esc 的出口。App 里那个引用靠 winfo_exists 自己失效。"""
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+    def copy_repo(self):
+        """复制的是完整地址（带 https://），界面上显示的那行只是省了协议头。"""
+        url = self.url or brand.REPO_URL
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(url)
+            self.canvas.itemconfigure(self.txt_hint, text="地址已复制")
+        except Exception:
+            self.canvas.itemconfigure(self.txt_hint, text="复制失败，请手动选中")
+
+    def open_repo(self):
+        """
+        唯一一处会叫出浏览器的地方，而且只在用户明确点这颗按钮时。
+        程序自身不发任何网络请求，这句承诺在「关于」里也写着。
+        """
+        try:
+            webbrowser.open(self.url or brand.REPO_URL)
+        except Exception:
+            self.copy_repo()
+
+
 # ---------------------------------------------------------------- 设置窗口
 
 
 class SettingsWindow(GlassWindow):
     WIDTH = 580
-    HEIGHT = 768
+    # 768 → 792：底部要留一整行给常驻署名（制作 by 允澈工坊），
+    # 挤在按钮那一行上面会把"保存"那颗的可见性压没。
+    HEIGHT = 792
 
     def __init__(self, master, app):
         GlassWindow.__init__(self, master, self.WIDTH, self.HEIGHT,
@@ -1143,6 +1271,20 @@ class SettingsWindow(GlassWindow):
         # 手滑一下常驻程序就没了，还没有任何地方告诉用户"关了就不提醒"。
         GlassButton(self, W - p - 92, by, 92, 38, "退出程序", self.quit_app,
                     primary=False, font_size=10, danger=True)
+
+        # ---- 常驻署名 ----
+        # 右下角一小行"制作 by 允澈工坊 · 喝水提醒 v0.9.1"，点开放大关于窗。
+        # 放在按钮行下面而不是标题旁边：标题那行已经有"今天会不会提醒"的副标题，
+        # 再挤品牌名就把最要紧的状态信息顶走了。
+        self.txt_credit = self.link(W - p, H - 16,
+                                    brand.credit_line("喝水提醒", core.VERSION),
+                                    self.show_about, size=9,
+                                    color=self.C["faint"], anchor="e",
+                                    key="credit")
+
+    def show_about(self):
+        """署名那点一下：真正的去重在 App.show_about()，托盘走同一个出口。"""
+        self.app.show_about()
 
 
     def update_alive_hint(self):

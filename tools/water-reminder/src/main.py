@@ -16,10 +16,12 @@ import time
 import traceback
 import tkinter as tk
 
+import brand
 import core
 import icon
 import win32ext
-from ui import HintWindow, ReminderWindow, SettingsWindow
+from ui import (AboutWindow, HintWindow, ReminderWindow, SettingsWindow,
+                resolve_dark)
 
 TICK_MS = 15000        # 调度判断的最长间隔
 POLL_MS = 500          # 主循环心跳：托盘点击的响应速度由它决定
@@ -36,6 +38,7 @@ MENU_AUTOSTART = 1006
 MENU_RESUME = 1007
 MENU_UNDO = 1008
 MENU_SKIP = 1009
+MENU_ABOUT = 1010
 TRAY_DOUBLE_CLICK = 90001
 TRAY_SINGLE_CLICK = 90002
 TRAY_ACTIVATE = win32ext.TRAY_ACTIVATE   # 第二实例把设置窗叫出来
@@ -97,6 +100,7 @@ class App(object):
         self._wake = 0.0             # 下次做调度判断的墙钟时刻
         self._hide_hint_shown = False
         self._quit_armed = 0.0       # 上次点"退出程序"的时刻（二次确认用）
+        self._about = None           # 关于窗：只允许一扇，重复点用 lift
 
         # 配置里的自启动开关以注册表实际状态为准
         actual = win32ext.get_autostart()
@@ -185,6 +189,7 @@ class App(object):
             # 菜单项写"要做的事"：今天已经静音了，这一条就该是「恢复今天的提醒」
             (MENU_SKIP, "恢复今天的提醒" if skipped else "今天不再提醒"),
             None,
+            (MENU_ABOUT, "关于 · 允澈工坊"),
             (MENU_EXIT, "退出"),
         ]
 
@@ -258,9 +263,35 @@ class App(object):
             self.refresh_tray()
         elif cmd == MENU_AUTOSTART:
             self.set_autostart(not bool(self.cfg.get("autoStart")))
+        elif cmd == MENU_ABOUT:
+            self.show_about()
         elif cmd == MENU_EXIT:
             # 托盘那条"退出"同样要确认：右键菜单点错一下，今天就不会再提醒了
             self.quit_from_ui()
+
+    def show_about(self):
+        """
+        关于窗（署名 + 版本 + 仓库 + 协议）。托盘菜单和设置窗口的署名行都走这里。
+
+        去重放在 App 而不是 SettingsWindow：设置窗可能被"收进托盘"再重建，
+        挂在窗口身上的话每重建一次就丢掉引用，关于窗能叠出好几扇。
+        """
+        win = self._about
+        if win is not None:
+            try:
+                if win.winfo_exists():
+                    win.lift()
+                    return win
+            except Exception:
+                pass
+            self._about = None
+        try:
+            self._about = AboutWindow(self.root, "喝水提醒", core.VERSION,
+                                      core.SUMMARY, dark=resolve_dark(self.cfg))
+        except Exception:
+            report_exception("打开关于窗")
+            return None
+        return self._about
 
     def resume_pause(self):
         """取消暂停：算"重新进入时段"，第一杯不等满一个间隔。"""
@@ -671,10 +702,12 @@ def print_version():
         core.DATA_DIR, "exe 同目录" if core.BASE_DIR_KIND == "portable" else "回落到用户目录"))
     print("配置文件：%s" % core.CONFIG_PATH)
     print("日志：%s" % core.LOG_PATH)
+    # 命令行也是引流入口：有人截图 --version 时，仓库地址跟着一起出去
+    print("制作 by %s：%s" % (brand.WORKSHOP, brand.REPO_URL))
 
 
 def print_usage():
-    print("喝水提醒 %s —— 只在设定的工作时段弹右下角提醒的常驻小工具" % core.VERSION)
+    print("喝水提醒 %s —— %s" % (core.VERSION, core.SUMMARY))
     print("")
     print("用法：WaterReminder.exe [--minimized] [--version] [--help]")
     print("  --minimized  启动后直接收进托盘，不弹设置窗口（开机自启用这个）")

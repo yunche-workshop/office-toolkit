@@ -10,8 +10,10 @@ ui.py —— 批量重命名的 Tk 界面
 
 import os
 import tkinter as tk
+import webbrowser
 from tkinter import ttk, filedialog, messagebox
 
+import brand
 import core
 import win32ext
 
@@ -112,6 +114,7 @@ class App(object):
         self.recursive = tk.BooleanVar(value=False)
         self.ext_filter = tk.StringVar(value="")
         self.sort_by = tk.StringVar(value="名称")  # 初值必须是中文，否则下拉框显示裸的 "name"
+        self._about = None             # 关于窗：只允许一扇，重复点用 lift
 
         self._setup_style()
         self._build()
@@ -416,6 +419,30 @@ class App(object):
         _checkbutton(btns, self.keep_ext, text="保留扩展名",
                      command=self.refresh_preview).pack(
             side="right", padx=(0, _px(16)))
+        # 常驻署名：右下角一小行，点一下开关于窗（品牌/版本/仓库/协议）。
+        # 用 tk.Label 不用 ttk.Label —— ttk 那种在深色底上点起来不像能按的东西。
+        self.credit = tk.Label(
+            btns, text=brand.credit_line("批量重命名", core.VERSION),
+            bg=BG, fg=FG2, font=_font(11), cursor="hand2")
+        self.credit.pack(side="right", padx=(0, _px(18)))
+        self.credit.bind("<Button-1>", lambda e: self.show_about())
+        self.credit.bind("<Enter>", lambda e: self.credit.configure(fg=ACCENT))
+        self.credit.bind("<Leave>", lambda e: self.credit.configure(fg=FG2))
+
+    def show_about(self):
+        """关于窗只开一扇：反复点署名不该在屏幕上叠出一排一模一样的窗。"""
+        win = getattr(self, "_about", None)
+        if win is not None:
+            try:
+                if win.winfo_exists():
+                    win.lift()
+                    return win
+            except Exception:
+                pass
+            self._about = None
+        self._about = AboutDialog(self.root, "批量重命名", core.VERSION,
+                                  core.SUMMARY)
+        return self._about
 
     # ------------------------------------------------------------ 文件
 
@@ -638,6 +665,108 @@ class App(object):
                     total, len(problems), problems[0][1]))
         else:
             messagebox.showinfo("撤销完成", "已还原 %d 个文件。" % total)
+
+
+class AboutDialog(tk.Toplevel):
+    """
+    关于小窗：品牌署名 + 版本 + 仓库 + 协议。
+
+    信息行和 water-reminder 那扇完全一样（brand.about_rows 是唯一来源），
+    只有外壳不同：这个工具是标准窗口 + ttk，那扇是自定义无边框玻璃窗。
+    两扇共用一套文案，以后加工具就只多一份外壳、不用重写内容。
+    """
+
+    WIDTH = 520
+
+    def __init__(self, parent, tool_name, version, summary):
+        tk.Toplevel.__init__(self, parent)
+        self.title("关于 · %s" % brand.WORKSHOP)
+        self.configure(bg=BG)
+        self.resizable(False, False)
+        self.transient(parent)
+        try:
+            win32ext.set_round_corner(win32ext.get_hwnd(self))
+        except Exception:
+            pass
+
+        head = ttk.Frame(self, padding=(_px(20), _px(16), _px(20), 0))
+        head.pack(fill="x")
+        ttk.Label(head, text=brand.WORKSHOP, style="Head.TLabel").pack(anchor="w")
+        ttk.Label(head, text="office-toolkit · 内网办公小工具集",
+                  style="Dim.TLabel").pack(anchor="w", pady=(_px(3), 0))
+
+        card = ttk.Frame(self, style="Card.TFrame",
+                         padding=(_px(14), _px(12)))
+        card.pack(fill="both", expand=True, padx=_px(20), pady=(_px(14), 0))
+        wrap = _px(self.WIDTH - 210)      # 值那一列的排版宽度（超了就换行）
+        self.url = brand.REPO_URL
+        for i, (label, value, target) in enumerate(
+                brand.about_rows(tool_name, version, summary)):
+            tk.Label(card, text=label, bg=CARD, fg=FG2, font=_font(11),
+                     anchor="w").grid(row=i, column=0, sticky="nw",
+                                      pady=_px(4))
+            widget = tk.Label(
+                card, text=value, bg=CARD, fg=ACCENT if target else FG,
+                font=_font(12), anchor="w", justify="left", wraplength=wrap)
+            if target:
+                # 显示的那行不带协议头，点它/复制它拿到的都是完整地址
+                self.url = target
+                widget.configure(cursor="hand2")
+                widget.bind("<Button-1>", lambda _e: self.open_repo())
+            widget.grid(row=i, column=1, sticky="w", padx=(_px(14), 0),
+                        pady=_px(4))
+        card.columnconfigure(1, weight=1)
+
+        bar = ttk.Frame(self, padding=(_px(20), _px(10), _px(20), _px(18)))
+        bar.pack(fill="x")
+        # 左边是"已复制"的回显：以前点复制没有任何反馈，只能靠猜
+        self.hint = tk.Label(bar, text="", bg=BG, fg=FG2, font=_font(11))
+        self.hint.pack(side="left")
+        ttk.Button(bar, text="打开仓库", style="Go.TButton",
+                   command=self.open_repo).pack(side="right")
+        ttk.Button(bar, text="复制仓库地址", command=self.copy_repo).pack(
+            side="right", padx=(0, _px(10)))
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+        # grab 要等窗口真的映射上来才设：自检脚本里父窗口是 withdraw 的，
+        # 那时候直接 grab_set 会咬一口 TclError。
+        self.after(80, self._apply_grab)
+        self.after(60, self._center_over, parent)
+
+    def _apply_grab(self):
+        try:
+            if self.winfo_viewable():
+                self.grab_set()
+        except Exception:
+            pass
+
+    def _center_over(self, parent):
+        """压在父窗口正中，再钳一次防止落到屏幕外（无边框工具窗找不回来）。"""
+        try:
+            self.update_idletasks()
+            w, h = self.winfo_width(), self.winfo_height()
+            x = parent.winfo_x() + (parent.winfo_width() - w) // 2
+            y = parent.winfo_y() + (parent.winfo_height() - h) // 2
+            x, y = win32ext.clamp_into_view(x, y, w, h)
+            self.geometry("+%d+%d" % (x, y))
+        except Exception:
+            pass
+
+    def copy_repo(self):
+        """复制的是完整地址（带 https://），界面上那行只是省了协议头。"""
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(self.url)
+            self.hint.configure(text="地址已复制")
+        except Exception:
+            self.hint.configure(text="复制失败，请手动选中")
+
+    def open_repo(self):
+        """只有用户明确点这颗按钮/这行地址才叫浏览器，程序自身不联网。"""
+        try:
+            webbrowser.open(self.url)
+        except Exception:
+            self.copy_repo()
 
 
 def run(root):

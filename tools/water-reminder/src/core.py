@@ -15,9 +15,12 @@ import sys
 
 APP_NAME = "WaterReminder"
 
-# 版本号的唯一来源：exe 元数据（build.py）、启动日志、设置窗口标题、CHANGELOG 都读这里。
+# 版本号的唯一来源：exe 元数据（build.py）、启动日志、设置窗口标题、关于窗、CHANGELOG 都读这里。
 # 每次改动打包前记得同步 CHANGELOG.md。
-VERSION = "0.9.0"
+VERSION = "0.9.1"
+
+# 一句话简介：关于窗、启动日志、README 首段都用这一句，别在界面里另写一版。
+SUMMARY = "只在设定的工作时段弹右下角提醒的常驻小工具"
 
 # 一天一个 JSON 文件，超过这个天数的挪进 data/archive/（只挪不删，历史永远在）
 ARCHIVE_AFTER_DAYS = 400
