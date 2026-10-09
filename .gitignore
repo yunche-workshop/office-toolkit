@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# 打包产物（exe 通过 GitHub Release 分发，不进仓库）
+build/
+dist/
+*.spec
+
+# 运行时数据
+data/
+config.json
+run.log
+*.log
+preview.log
+dev_start.log
+mem.txt
+
+# 旧版归档（PowerShell 版，已弃用）
+_旧版归档/
+
+# 真机"拖动闪退"排查用的压测/探针脚本与截图产物
+# 本地保留、不推 GitHub：属于调试现场，不是工具功能，读者也不需要看
+tools/water-reminder/tests/drag_probe/
+tools/water-reminder/tests/drag_*.py
+tools/water-reminder/tests/tray_probe.py
+tools/water-reminder/tests/screenshot.py
+tools/water-reminder/tests/shot_*.png
+tools/water-reminder/tests/_drag_*.py
+tools/water-reminder/tests/_fix_*.py
+
+# 图标生成过程的预览图（人眼检查用，随时可重生成）
+tools/water-reminder/assets/*_preview.png
