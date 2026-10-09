@@ -57,6 +57,49 @@ def _pos_cn(kind, value):
     return "日期在前" if value == "prefix" else "日期在后"
 
 
+def _checkbutton(parent, var, text=None, command=None, bg=CARD):
+    """
+    自绘勾选框。
+
+    不用 ttk.Checkbutton 的原因：它的 indicator 是主题固定尺寸，
+    在 200% 缩放的屏上不跟着放大（又小又糊），勾选后的颜色变化也不明显，
+    真机上根本看不出勾没勾。这里自己画：勾上=蓝底白勾，没勾=深灰描边。
+    """
+    size = _px(20)
+    holder = ttk.Frame(parent, style="Card.TFrame")
+    c = tk.Canvas(holder, width=size, height=size, bg=bg,
+                  highlightthickness=0, cursor="hand2")
+    c.pack(side="left")
+
+    def draw(*_a):
+        c.delete("all")
+        p = _px(2)
+        if var.get():
+            c.create_rectangle(p, p, size - p, size - p,
+                               fill=ACCENT, outline=ACCENT, width=_px(2))
+            c.create_line(size * 0.28, size * 0.52,
+                          size * 0.44, size * 0.70,
+                          size * 0.74, size * 0.32,
+                          fill="#ffffff", width=_px(2))
+        else:
+            c.create_rectangle(p, p, size - p, size - p,
+                               fill=CARD2, outline=LINE, width=_px(2))
+
+    def toggle(_e=None):
+        var.set(not var.get())
+        if command:
+            command()
+
+    c.bind("<Button-1>", toggle)
+    if text:
+        lb = ttk.Label(holder, text=text, style="Card.TLabel", cursor="hand2")
+        lb.pack(side="left", padx=(_px(6), 0))
+        lb.bind("<Button-1>", toggle)
+    var.trace_add("write", lambda *_a: draw())   # 值被代码改了也要重画
+    draw()
+    return holder
+
+
 class App(object):
     def __init__(self, root):
         self.root = root
@@ -68,7 +111,7 @@ class App(object):
         self.keep_ext = tk.BooleanVar(value=True)
         self.recursive = tk.BooleanVar(value=False)
         self.ext_filter = tk.StringVar(value="")
-        self.sort_by = tk.StringVar(value="name")
+        self.sort_by = tk.StringVar(value="名称")  # 初值必须是中文，否则下拉框显示裸的 "name"
 
         self._setup_style()
         self._build()
@@ -106,6 +149,13 @@ class App(object):
                      insertcolor=FG, bordercolor=LINE, arrowcolor=FG)
         st.configure("TCombobox", fieldbackground=CARD2, foreground=FG,
                      background=CARD2, bordercolor=LINE, arrowcolor=FG)
+        # 坑：readonly 状态的 Combobox 不吃上面的 configure，必须用 map 单独配，
+        # 否则就是系统默认白底 + 白字，肉眼只见一个白块（真机截图抓到过）
+        st.map("TCombobox",
+               fieldbackground=[("readonly", CARD2), ("disabled", CARD2)],
+               foreground=[("readonly", FG), ("disabled", FG2)],
+               selectbackground=[("readonly", CARD2)],
+               selectforeground=[("readonly", FG)])
         st.configure("TButton", background=CARD2, foreground=FG,
                      bordercolor=LINE, font=_font(12), padding=(10, 6),
                      relief="flat")
@@ -129,7 +179,7 @@ class App(object):
         r = self.root
         r.title("批量重命名")
         r.configure(bg=BG)
-        r.geometry("%dx%d" % (_px(980), _px(760)))
+        r.geometry("%dx%d" % (_px(980), _px(820)))
         r.minsize(_px(860), _px(620))
 
         pad = _px(16)
@@ -142,8 +192,11 @@ class App(object):
 
         self._build_files(r, pad)
         self._build_rules(r, pad)
-        self._build_preview(r, pad)
+        # 顺序要紧：底部栏必须先用 side="bottom" 占住位置。
+        # 反过来让预览区先 pack 的话，它的 expand=True 会把剩余空间全吃光，
+        # 底部那排按钮就被挤出可视区——只能全屏才看得见。
         self._build_bottom(r, pad)
+        self._build_preview(r, pad)
 
     def _build_files(self, parent, pad):
         box = ttk.Frame(parent, style="Card.TFrame",
@@ -161,9 +214,8 @@ class App(object):
         ttk.Button(bar, text="清空", command=self.clear_files).pack(
             side="left", padx=(_px(8), 0))
 
-        ttk.Checkbutton(bar, text="含子文件夹", variable=self.recursive,
-                        style="Card.TCheckbutton",
-                        command=self.refresh_preview).pack(
+        _checkbutton(bar, self.recursive, text="含子文件夹",
+                     command=self.refresh_preview).pack(
             side="left", padx=(_px(16), 0))
         ttk.Label(bar, text="只看后缀", style="Card.TLabel").pack(
             side="left", padx=(_px(16), 0))
@@ -181,7 +233,7 @@ class App(object):
 
         wrap = ttk.Frame(box, style="Card.TFrame")
         wrap.pack(fill="both", expand=True, pady=(_px(10), 0))
-        lb = tk.Listbox(wrap, height=5, bg=CARD2, fg=FG, bd=0,
+        lb = tk.Listbox(wrap, height=4, bg=CARD2, fg=FG, bd=0,
                         highlightthickness=0, selectbackground="#2c3a5e",
                         selectforeground=FG, font=_font(12),
                         activestyle="none")
@@ -208,15 +260,14 @@ class App(object):
 
     def _rule_row(self, parent, rule):
         row = ttk.Frame(parent, style="Card.TFrame")
-        row.pack(fill="x", pady=(_px(6), 0))
+        row.pack(fill="x", pady=(_px(4), 0))
         kind = rule["kind"]
         v = {}
         self.vars[kind] = v
 
         en = tk.BooleanVar(value=rule.get("enabled", False))
         v["enabled"] = en
-        ttk.Checkbutton(row, variable=en, style="Card.TCheckbutton",
-                        command=self.refresh_preview).pack(side="left")
+        _checkbutton(row, en, command=self.refresh_preview).pack(side="left")
         ttk.Label(row, text=core.rule_label(kind), width=10,
                   style="Card.TLabel", foreground=FG2).pack(side="left")
 
@@ -230,8 +281,7 @@ class App(object):
                 side="left", padx=(_px(6), 0))
             ttk.Entry(row, textvariable=v["to"], width=18).pack(
                 side="left", padx=(_px(6), 0))
-            ttk.Checkbutton(row, text="区分大小写", variable=v["case_sensitive"],
-                            style="Card.TCheckbutton").pack(
+            _checkbutton(row, v["case_sensitive"], text="区分大小写").pack(
                 side="left", padx=(_px(10), 0))
 
         elif kind == "regex":
@@ -331,7 +381,7 @@ class App(object):
         wrap = ttk.Frame(box, style="Card.TFrame")
         wrap.pack(fill="both", expand=True, pady=(_px(8), 0))
         cols = ("old", "arrow", "new", "status")
-        tv = ttk.Treeview(wrap, columns=cols, show="headings", height=8)
+        tv = ttk.Treeview(wrap, columns=cols, show="headings", height=6)
         tv.heading("old", text="现在叫什么")
         tv.heading("arrow", text="")
         tv.heading("new", text="改完之后")
@@ -350,8 +400,8 @@ class App(object):
         self.tree = tv
 
     def _build_bottom(self, parent, pad):
-        bar = ttk.Frame(parent, padding=(pad, _px(12), pad, _px(14)))
-        bar.pack(fill="x")
+        bar = ttk.Frame(parent, padding=(pad, _px(10), pad, _px(12)))
+        bar.pack(side="bottom", fill="x")
         self.summary = ttk.Label(bar, text="先添加文件", style="Dim.TLabel")
         self.summary.pack(anchor="w")
 
@@ -363,8 +413,8 @@ class App(object):
             side="left", padx=(_px(8), 0))
         ttk.Button(btns, text="开始改名", style="Go.TButton",
                    command=self.do_rename).pack(side="right")
-        ttk.Checkbutton(btns, text="保留扩展名", variable=self.keep_ext,
-                        command=self.refresh_preview).pack(
+        _checkbutton(btns, self.keep_ext, text="保留扩展名",
+                     command=self.refresh_preview).pack(
             side="right", padx=(0, _px(16)))
 
     # ------------------------------------------------------------ 文件

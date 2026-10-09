@@ -16,7 +16,7 @@ import win32ext  # noqa: E402
 import ui  # noqa: E402
 
 WIN_W = 980
-WIN_H = 760
+WIN_H = 820
 
 
 def center(root, w, h):
