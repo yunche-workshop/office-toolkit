@@ -1045,7 +1045,10 @@ class SettingsWindow(GlassWindow):
         self._label(p + 20, 210, "最近 7 天", size=9)
         self._chart_box = (p + 112, 188, W - p - 20, 222)
         self._chart_label_y = 234
-        self.txt_streak = self.text(W - p - 20, 210, "", size=9,
+        # 连续达标写在卡片右上角、和"今日进度"同一基线。
+        # 原来放在 (W-p-20, 210)——那正好是柱状图最右边那根的位置，
+        # 真机上"连续达标 N 天"被今天的柱子压住半个字（截图才看得出来）。
+        self.txt_streak = self.text(W - p - 20, 92, "", size=9,
                                     color=self.C["sub"], anchor="e")
 
         # ---- 状态条：现在到底是个什么状态 ----
@@ -1087,7 +1090,7 @@ class SettingsWindow(GlassWindow):
         self.toggles["workdaysOnly"] = Toggle(self, p + 430, rows["r3"],
                                               self.cfg.get("workdaysOnly", False))
 
-        self._label(p, cy("r4"), "午休免打扰")
+        self._label(p, cy("r4"), "午休时段")
         self._entry(p + 88, cy("r4"), "lunchStart",
                     self.cfg.get("lunchBreak", {}).get("start"))
         self._label(p + 170, cy("r4"), "—")

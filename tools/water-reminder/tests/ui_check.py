@@ -102,6 +102,18 @@ def run_checks(app, root):
           str(bbox(win)))
     check("自适应缩放因子有效", win.MIN_FIT <= win.fit <= 1.0,
           "fit=%.2f S=%.2f" % (win.fit, win.S))
+
+    # ---------- 文字不许压在柱状图上 ----------
+    # 打包产物截图才发现"连续达标 N 天"和最近 7 天那排柱子叠在同一个位置，
+    # 最右边那根把字吃掉半个。肉眼看得见、断言里没有 → 补一条几何相交检查。
+    win.canvas.itemconfigure(win.txt_streak, text="连续达标 120 天")
+    win.canvas.update_idletasks()
+    sb = win.canvas.bbox(win.txt_streak)
+    cb = tuple(win.u(v) for v in win._chart_box)
+    separated = (sb is None or sb[2] <= cb[0] or sb[0] >= cb[2]
+                 or sb[3] <= cb[1] or sb[1] >= cb[3])
+    check("连续达标那行不压到柱状图", separated, "streak=%s chart=%s" % (sb, cb))
+
     dark_bg = win.C["bg"]
 
     # ---------- 换浅色：配色真的变了，而且重建后仍然居中 ----------

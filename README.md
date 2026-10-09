@@ -10,7 +10,7 @@
 
 | 工具 | 干什么 | 体积 | 状态 |
 |---|---|---|---|
-| [喝水提醒](tools/water-reminder/) | 只在工作时段提醒你喝水，午休自动跳过，玻璃质感弹窗，缩在托盘里 | 8.0 MB | ✅ 可用 |
+| [喝水提醒](tools/water-reminder/) | 只在工作时段提醒你喝水，进时段先弹一杯、午休自动跳过，玻璃质感弹窗，缩在托盘里 | 8.0 MB | ✅ v0.9.0 |
 | [批量重命名](tools/batch-renamer/) | 八条规则链批量改名，执行前预览、撞名标红，**改错了一键撤销** | 7.6 MB | ✅ 可用 |
 
 后面还会加图片批量处理、Excel 批量合并之类——都是自己每周真在用的活儿。
@@ -44,8 +44,9 @@ office-toolkit/
 └─ tools/
    ├─ water-reminder/     喝水提醒
    │  ├─ README.md        工具说明
+   │  ├─ CHANGELOG.md     改动记录（版本号来源是 src/core.py 的 VERSION）
    │  ├─ src/             源码（纯标准库）
-   │  ├─ tests/           自检脚本
+   │  ├─ tests/           单测 + 真机自检
    │  ├─ assets/          图标
    │  └─ build.py         打包脚本
    └─ batch-renamer/      批量重命名

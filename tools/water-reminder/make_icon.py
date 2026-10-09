@@ -322,6 +322,77 @@ def saturize(w, h, rgba, boost=1.18, gamma=0.92):
     return bytes(out)
 
 
+def gradient_colors(w, h, rgba, band=0.22):
+    """
+    从母图取"上亮下深"两档主色。
+
+    小尺寸重画时用这两档，颜色和大尺寸是同一张图里出来的，
+    不会出现 16px 偏青、48px 偏蓝这种"两个图标不像一个东西"。
+    """
+    n = int(max(1, h * band))
+    acc_t = [0.0, 0.0, 0.0]
+    acc_b = [0.0, 0.0, 0.0]
+    ct = cb = 0
+    for y in range(h):
+        base = y * w * 4
+        head = y < n
+        tail = y >= h - n
+        if not (head or tail):
+            continue
+        for x in range(w):
+            k = base + x * 4
+            a = rgba[k + 3]
+            if a < 200:
+                continue
+            tgt, cnt = (acc_t, "t") if head else (acc_b, "b")
+            tgt[0] += rgba[k] * a
+            tgt[1] += rgba[k + 1] * a
+            tgt[2] += rgba[k + 2] * a
+            if cnt == "t":
+                ct += a
+            else:
+                cb += a
+    def avg(acc, total):
+        if not total:
+            return (90, 180, 240)
+        return tuple(int(v / total) for v in acc)
+    return avg(acc_t, ct), avg(acc_b, cb)
+
+
+def redraw_small(w, h, rgba, top_rgb, bottom_rgb, lo=88, hi=205):
+    """
+    16/24px 单独重画：留母图的轮廓，颜色和光泽自己画。
+
+    母图是 1024 的图，里面那道高光到 16px 只剩两三个像素，跟本体糊在一起，
+    结果托盘里看着就是一团没有尖的青色块（预览图里对比过，肉眼可见）。
+    这里把 alpha 拉成"轮廓实、边缘一个像素过渡"，再按上亮下深重铺一条渐变，
+    补一颗位置固定的高光 —— 形状还是那颗水滴，但 16px 上终于能看出个尖。
+    """
+    out = bytearray(w * h * 4)
+    hx, hy = w * 0.38, h * 0.42
+    rx, ry = max(1.0, w * 0.17), max(1.0, h * 0.22)
+    span = max(1, hi - lo)
+    for y in range(h):
+        t = (y + 0.5) / float(h)
+        base = [top_rgb[i] + (bottom_rgb[i] - top_rgb[i]) * t for i in range(3)]
+        for x in range(w):
+            k = (y * w + x) * 4
+            a = rgba[k + 3]
+            if a <= lo:
+                continue
+            cov = 1.0 if a >= hi else (a - lo) / float(span)
+            d = ((x + 0.5 - hx) / rx) ** 2 + ((y + 0.5 - hy) / ry) ** 2
+            px = base
+            if d < 1.0:
+                glow = (1.0 - d) ** 1.2 * 0.62
+                px = [base[i] + (255 - base[i]) * glow for i in range(3)]
+            out[k] = int(max(0, min(255, px[0])))
+            out[k + 1] = int(max(0, min(255, px[1])))
+            out[k + 2] = int(max(0, min(255, px[2])))
+            out[k + 3] = int(cov * 255)
+    return bytes(out)
+
+
 # ---------------------------------------------------------------- ICO / PNG 输出
 
 def ico_frame(w, h, rgba):
@@ -434,23 +505,27 @@ def main():
     box = bbox(w, h, rgba)
     print("内容外接框 %s（%dx%d）" % (box, box[2] - box[0] + 1, box[3] - box[1] + 1))
     w, h, rgba = crop_pad(w, h, rgba, box)
+    top_rgb, bottom_rgb = gradient_colors(w, h, rgba)
+    print("渐变取色：上 %s / 下 %s" % (top_rgb, bottom_rgb))
 
     frames, shown = [], []
     for size in SIZES:
         sw, sh, data = shrink(w, h, rgba, size)
-        # 越小越要"下手"：1024 的高光到 16px 会占掉半个水滴，
-        # 放在浅色任务栏上就是一个发白的糊点。
-        if size <= 16:
-            data = saturize(sw, sh, data, boost=1.45, gamma=1.06)
-            data = harden(sw, sh, data, floor=72, gain=1.8)
-        elif size <= 24:
-            data = saturize(sw, sh, data, boost=1.32)
-            data = harden(sw, sh, data)
+        # 越小越要"下手"：母图那道高光到 16px 只剩两三个像素，跟本体糊成
+        # 一团没有尖的青色块。16/24 直接用母图轮廓重画，32 以上信息量够，
+        # 只需要提饱和度、收半透明边。
+        if size <= 24:
+            data = redraw_small(sw, sh, data, top_rgb, bottom_rgb)
         elif size <= 32:
             data = saturize(sw, sh, data, boost=1.16)
+        else:
+            data = saturize(sw, sh, data, boost=1.18, gamma=0.92)
+        if size <= 32:
+            data = harden(sw, sh, data)
         frames.append((size, ico_frame(sw, sh, data)))
         shown.append((size, data))
-        print("  %d px：%d bytes" % (size, len(frames[-1][1])))
+        print("  %d px：%d bytes%s" % (size, len(frames[-1][1]),
+                                       "（重画）" if size <= 24 else ""))
 
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(dst, "wb") as fh:
